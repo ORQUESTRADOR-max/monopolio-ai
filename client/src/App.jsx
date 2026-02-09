@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  PlusCircle, RefreshCw, DollarSign, Zap, History, ArrowRightLeft, 
-  Banknote, BrainCircuit, X, Play, Trash2, ArrowUpRight, ArrowDownRight, Menu 
+  PlusCircle, MinusCircle, RefreshCw, DollarSign, TrendingUp, TrendingDown, 
+  Zap, Users, History, ArrowRightLeft, Banknote, BrainCircuit, X, Play, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
 import io from 'socket.io-client';
 
@@ -16,7 +16,6 @@ const formatMoney = (value) => {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
-// --- COMPONENTE PRINCIPAL ---
 export default function MonopolyBankApp() {
   const [gameState, setGameState] = useState('setup'); // setup, playing
   const [players, setPlayers] = useState([]);
@@ -25,33 +24,30 @@ export default function MonopolyBankApp() {
   const [globalEvent, setGlobalEvent] = useState(null);
   const [opportunity, setOpportunity] = useState(null);
   const [myPlayerId, setMyPlayerId] = useState(null);
-  const [globalCount, setGlobalCount] = useState(0);
+  const [interactionCount, setInteractionCount] = useState(0);
 
-  // Controle de Modais
-  const [selectedAction, setSelectedAction] = useState(null); // pay, receive, transfer
-  const [transferTarget, setTransferTarget] = useState('');
+  // Controle de Modais e Views
+  const [selectedPlayer, setSelectedPlayer] = useState(null); // Jogador "Foco"
+  const [transferTarget, setTransferTarget] = useState(null); 
   const [amountInput, setAmountInput] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard'); // dashboard, history
 
   // --- SOCKET.IO EFFECTS ---
   useEffect(() => {
-    // Tenta recuperar sessão anterior
-    const storedName = localStorage.getItem('monopoly_username');
-    if (storedName && gameState === 'setup') {
-        // Opcional: Auto-join
-    }
-
     socket.on('update_players', (serverPlayers) => {
-      // O servidor manda um objeto {socketId: player}, convertemos para array
       const playersArray = Object.values(serverPlayers);
       setPlayers(playersArray);
+      
+      if (selectedPlayer) {
+        const updatedMe = playersArray.find(p => p.id === selectedPlayer.id);
+        if (updatedMe) setSelectedPlayer(updatedMe);
+      }
     });
 
     socket.on('new_log', (log) => {
       addToHistory(log.type, log.text);
-      // Se for evento global, atualiza contador (aproximado)
-      if (log.type === 'transaction' || log.type === 'global') {
-          setGlobalCount(prev => (prev + 1) % GLOBAL_EVENT_TRIGGER);
+      if (log.type === 'transaction' || log.type === 'opportunity') {
+          setInteractionCount(prev => prev + 1);
       }
     });
 
@@ -64,7 +60,6 @@ export default function MonopolyBankApp() {
     });
 
     socket.on('game_log', (logs) => {
-        // Carrega histórico inicial
         const formattedLogs = logs.map(l => ({
             time: new Date().toLocaleTimeString(),
             category: l.type.toUpperCase(),
@@ -80,12 +75,11 @@ export default function MonopolyBankApp() {
       socket.off('opportunity_result');
       socket.off('game_log');
     };
-  }, []);
+  }, [selectedPlayer]);
 
   // --- LÓGICA DO JOGO ---
   const joinGame = () => {
     if (newPlayerName.trim() === '') return;
-    
     socket.emit('join_game', newPlayerName);
     setMyPlayerId(socket.id); 
     setGameState('playing');
@@ -98,18 +92,19 @@ export default function MonopolyBankApp() {
     const amount = type === 'pass_go' ? PASS_GO_AMOUNT : parseInt(amountInput);
     if (isNaN(amount) && type !== 'pass_go') return;
 
+    const socketType = type === 'transfer' ? 'pay_player' : type;
+
     const payload = {
-      type,
+      type: socketType,
       amount,
       targetId: transferTarget
     };
 
     socket.emit('transaction', payload);
     
-    // Limpar estado local
     setAmountInput('');
-    setTransferTarget('');
-    setSelectedAction(null);
+    setTransferTarget(null);
+    setSelectedPlayer(null);
   };
 
   const handleOpportunity = () => {
@@ -120,331 +115,326 @@ export default function MonopolyBankApp() {
     setHistory(prev => [{ time: new Date().toLocaleTimeString(), category: category.toUpperCase(), desc }, ...prev]);
   };
 
-  // Encontra meu jogador na lista atualizada pelo servidor
   const me = players.find(p => p.id === socket.id);
 
   // --- RENDERIZADORES ---
 
   if (gameState === 'setup') {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 font-sans">
-        <div className="max-w-md w-full bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700 relative overflow-hidden">
-            {/* Efeito de fundo */}
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-cyan-500 to-emerald-500 animate-pulse"></div>
-
-            <div className="flex justify-center mb-6 text-emerald-400">
-                <Banknote size={64} className="animate-bounce" />
+      <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-6 font-sans">
+        <div className="max-w-md w-full bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700">
+          <div className="flex justify-center mb-6 text-emerald-400">
+            <Banknote size={64} />
+          </div>
+          <h1 className="text-3xl font-bold text-center mb-2 text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400">
+            Monopoly Bank
+          </h1>
+          <p className="text-slate-400 text-center mb-8">Gerenciador Financeiro & IA</p>
+          
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <input 
+                type="text" 
+                value={newPlayerName} 
+                onChange={(e) => setNewPlayerName(e.target.value)} 
+                placeholder="Nome do Jogador" 
+                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 focus:outline-none focus:border-emerald-500 transition-colors text-white"
+                onKeyDown={(e) => e.key === 'Enter' && joinGame()}
+              />
+              <button 
+                onClick={joinGame} 
+                className="bg-emerald-600 hover:bg-emerald-500 text-white p-3 rounded-lg transition-colors"
+              >
+                <PlusCircle />
+              </button>
             </div>
 
-            <h1 className="text-3xl font-bold text-center mb-2 text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400">
-                Monopoly Bank
-            </h1>
-            <p className="text-slate-400 text-center mb-8 text-sm">Gerenciador Financeiro & IA</p>
+            <div className="max-h-60 overflow-y-auto space-y-2 my-4">
+                {players.map(p => (
+                    <div key={p.id} className="flex justify-between items-center bg-slate-700/50 p-3 rounded-lg border border-slate-600">
+                        <span className="font-semibold text-slate-200">{p.name}</span>
+                        <span className="text-emerald-400 font-mono text-sm">{formatMoney(p.balance)}</span>
+                    </div>
+                ))}
+                {players.length === 0 && <p className="text-center text-slate-500 text-sm italic">Adicione jogadores para começar</p>}
+            </div>
 
-            <div className="space-y-4">
-                <div className="flex gap-2">
-                    <input 
-                        type="text" 
-                        value={newPlayerName} 
-                        onChange={(e) => setNewPlayerName(e.target.value)} 
-                        placeholder="Nome do Jogador" 
-                        className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 focus:outline-none focus:border-emerald-500 transition-colors text-white"
-                        onKeyDown={(e) => e.key === 'Enter' && joinGame()} 
-                    />
-                    <button 
-                        onClick={joinGame} 
-                        disabled={!newPlayerName.trim()}
-                        className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white p-3 rounded-lg transition-colors" 
-                    >
-                        <PlusCircle />
-                    </button>
-                </div>
-                
-                {/* Lista de Jogadores Online (Preview) */}
-                <div className="max-h-40 overflow-y-auto space-y-2 my-4 pr-1 scrollbar-hide">
-                    <p className="text-xs text-slate-500 uppercase font-bold mb-2">Jogadores na Sala:</p>
-                    {players.map(p => (
-                        <div key={p.id} className="flex justify-between items-center bg-slate-700/30 p-2 rounded border border-slate-600/50 text-sm">
-                            <span className="font-semibold text-slate-300">{p.name}</span>
-                            <span className="text-emerald-400/80 text-xs">Online</span>
-                        </div>
-                    ))}
-                    {players.length === 0 && <p className="text-center text-slate-600 text-xs italic">Ninguém online ainda.</p>}
-                </div>
-            </div>
-            
-            <div className="mt-6 text-center text-xs text-slate-600 flex items-center justify-center gap-1">
-                <BrainCircuit size={14} /> Powered by Google Gemini
-            </div>
+            <button 
+                onClick={() => players.length >= 1 ? setGameState('playing') : alert("Adicione pelo menos 1 jogador.")} 
+                className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg transform transition-all ${players.length >= 1 ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:scale-[1.02] text-white' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}
+            >
+                INICIAR JOGO / ENTRAR
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  // JOGO (PLAYING)
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-24 overflow-x-hidden">
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-20">
       
       {/* Header */}
-      <header className="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 p-4 sticky top-0 z-10 shadow-lg">
+      <header className="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-10 shadow-lg">
         <div className="flex justify-between items-center max-w-4xl mx-auto">
-            <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${socket.connected ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
-                <span className="font-bold text-lg tracking-wider text-slate-200">MONOPOLY</span>
-            </div>
-            
-            <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 text-xs bg-slate-800 px-3 py-1.5 rounded-full border border-slate-700">
-                    <RefreshCw size={12} className={globalCount >= 8 ? "animate-spin text-yellow-400" : "text-slate-400"} />
-                    <span className={globalCount >= 8 ? "text-yellow-400 font-bold" : "text-slate-400"}>
-                        Evento: {GLOBAL_EVENT_TRIGGER - globalCount}
-                    </span>
-                </div>
-                <button onClick={() => setActiveTab(activeTab === 'dashboard' ? 'history' : 'dashboard')} className="p-2 bg-slate-800 rounded-lg border border-slate-700 text-slate-400 hover:text-white transition">
-                    {activeTab === 'dashboard' ? <History size={18} /> : <X size={18} />}
-                </button>
-            </div>
+          <div className="flex items-center gap-2">
+            <Banknote className="text-emerald-500" />
+            <span className="font-bold text-lg tracking-wider">MONOPOLY BANK</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs bg-slate-800 px-3 py-1 rounded-full border border-slate-700">
+            <RefreshCw size={12} className={interactionCount % GLOBAL_EVENT_TRIGGER === 0 && interactionCount > 0 ? "animate-spin text-yellow-400" : "text-slate-400"} />
+            <span className={interactionCount % GLOBAL_EVENT_TRIGGER >= 8 ? "text-yellow-400 font-bold" : "text-slate-400"}>
+              Evento: {GLOBAL_EVENT_TRIGGER - (interactionCount % GLOBAL_EVENT_TRIGGER)}
+            </span>
+          </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="p-4 max-w-4xl mx-auto space-y-6">
         
-        {/* Global Event Modal */}
+        {/* Global Event Notification Modal */}
         {globalEvent && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-fadeIn">
-                <div className="bg-gradient-to-b from-slate-800 to-slate-900 border border-yellow-600/50 p-6 rounded-2xl max-w-sm w-full shadow-2xl relative overflow-hidden transform scale-100">
-                    <div className="absolute top-0 left-0 w-full h-1 bg-yellow-500"></div>
-                    <div className="flex flex-col items-center text-center space-y-4">
-                        <div className="bg-yellow-500/20 p-4 rounded-full text-yellow-500 animate-bounce">
-                            <Zap size={32} />
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+            <div className="bg-gradient-to-b from-slate-800 to-slate-900 border border-yellow-600/50 p-6 rounded-2xl max-w-sm w-full shadow-2xl relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-1 bg-yellow-500"></div>
+                <div className="flex flex-col items-center text-center space-y-4">
+                <div className="bg-yellow-500/20 p-4 rounded-full text-yellow-500 animate-bounce">
+                    <Zap size={32} />
+                </div>
+                <h2 className="text-2xl font-bold text-yellow-400 uppercase tracking-widest">Evento Global</h2>
+                <h3 className="text-xl font-semibold text-white">{globalEvent.title}</h3>
+                <p className="text-slate-300">{globalEvent.description}</p>
+                <button 
+                    onClick={() => setGlobalEvent(null)} 
+                    className="w-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-white py-3 rounded-xl mt-4 font-bold"
+                >
+                    Confirmar
+                </button>
+                </div>
+            </div>
+            </div>
+        )}
+
+        {/* Opportunity Result Modal */}
+        {opportunity && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                <div className={`bg-slate-900 border-2 p-6 rounded-2xl max-w-sm w-full shadow-2xl text-center relative overflow-hidden ${opportunity.type === 'gain' ? 'border-emerald-500/50' : 'border-rose-500/50'}`}>
+                    <div className="flex flex-col items-center gap-4">
+                        <div className={`p-4 rounded-full ${opportunity.type === 'gain' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                            <BrainCircuit size={40} />
                         </div>
-                        <h2 className="text-2xl font-bold text-yellow-400 uppercase tracking-widest">Evento Global</h2>
-                        <h3 className="text-xl font-semibold text-white">{globalEvent.title}</h3>
-                        <p className="text-slate-300 leading-relaxed text-sm">{globalEvent.description}</p>
+                        <div>
+                            <h3 className="text-sm uppercase tracking-widest text-slate-400 mb-1">IA Analisou:</h3>
+                            <h2 className={`text-2xl font-bold ${opportunity.type === 'gain' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {opportunity.title}
+                            </h2>
+                        </div>
+                        <p className="text-slate-200 text-lg">{opportunity.description}</p>
                         
+                        <div className={`text-3xl font-bold my-2 ${opportunity.type === 'gain' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                            {opportunity.type === 'gain' ? '+' : '-'}{formatMoney(Math.abs(opportunity.value))}
+                        </div>
+
                         <button 
-                            onClick={() => setGlobalEvent(null)} 
-                            className="w-full bg-slate-700 hover:bg-slate-600 border border-slate-500 text-white py-3 rounded-xl mt-4 font-bold transition shadow-lg"
+                            onClick={() => { setOpportunity(null); setSelectedPlayer(null); }}
+                            className="w-full bg-slate-800 hover:bg-slate-700 text-white py-3 rounded-xl border border-slate-600"
                         >
-                            Confirmar
+                            Entendido
                         </button>
                     </div>
                 </div>
             </div>
         )}
 
-        {/* Opportunity Modal */}
-        {opportunity && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-fadeIn">
-                <div className={`bg-slate-800 border-2 w-full max-w-sm rounded-3xl p-6 text-center shadow-2xl relative ${opportunity.type === 'gain' ? 'border-emerald-500/50 shadow-emerald-500/20' : 'border-red-500/50 shadow-red-500/20'}`}>
-                    <div className="mb-4 text-5xl animate-pulse">
-                        {opportunity.type === 'gain' ? '🍀' : '⚠️'}
-                    </div>
-                    <h2 className={`text-xl font-black mb-2 uppercase tracking-wide ${opportunity.type === 'gain' ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {opportunity.title}
-                    </h2>
-                    <p className="text-slate-300 mb-6 text-sm">{opportunity.description}</p>
-                    
-                    <div className={`text-4xl font-black mb-6 ${opportunity.type === 'gain' ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {opportunity.type === 'gain' ? '+' : '-'}{opportunity.displayValue}
-                    </div>
-
-                    <button 
-                        onClick={() => setOpportunity(null)}
-                        className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl transition"
-                    >
-                        Continuar
-                    </button>
-                </div>
-            </div>
-        )}
-
-        {activeTab === 'dashboard' ? (
-            <>
-                {/* Cartão de Saldo Principal */}
-                <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-6 rounded-3xl shadow-xl border border-slate-700 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-4 opacity-10">
-                        <Banknote size={120} />
-                    </div>
-                    
-                    <div className="relative z-10">
-                        <div className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Saldo Disponível</div>
-                        <div className="text-5xl font-black text-white tracking-tighter drop-shadow-lg mb-6">
-                            {me ? formatMoney(me.balance) : '---'}
+        {/* Player Selection Modal (Action Menu) */}
+        {selectedPlayer && !opportunity && (
+            <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm sm:p-4">
+                <div className="bg-slate-900 w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl border-t sm:border border-slate-700 shadow-2xl max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom duration-300">
+                    <div className="sticky top-0 bg-slate-900/95 backdrop-blur z-10 p-4 border-b border-slate-800 flex justify-between items-center">
+                        <div>
+                            <h2 className="text-xl font-bold text-white">{selectedPlayer.name}</h2>
+                            <p className="text-emerald-400 font-mono text-lg">{formatMoney(selectedPlayer.balance)}</p>
                         </div>
-
-                        <div className="flex gap-3">
-                            <button 
-                                onClick={() => handleTransaction('pass_go')}
-                                className="flex-1 bg-slate-700/50 hover:bg-slate-700 border border-slate-600 rounded-xl py-3 px-4 flex items-center justify-center gap-2 transition group"
-                            >
-                                <RefreshCw size={18} className="text-emerald-400 group-hover:rotate-180 transition-transform duration-500" />
-                                <span className="text-xs font-bold text-emerald-400 uppercase">Passar Início (+200)</span>
-                            </button>
-                        </div>
+                        <button 
+                            onClick={() => { setSelectedPlayer(null); setTransferTarget(null); setAmountInput(''); }}
+                            className="p-2 bg-slate-800 rounded-full text-slate-400"
+                        >
+                            <X size={20} />
+                        </button>
                     </div>
-                </div>
 
-                {/* Grid de Ações */}
-                <div className="grid grid-cols-2 gap-4">
-                    <button 
-                        onClick={() => setSelectedAction('pay')}
-                        className="bg-slate-800 p-6 rounded-2xl border border-slate-700 hover:border-red-500/50 transition active:scale-95 flex flex-col items-center justify-center gap-3 group"
-                    >
-                        <div className="p-3 bg-red-500/10 rounded-full group-hover:bg-red-500/20 transition">
-                            <ArrowUpRight className="text-red-500" size={28} />
-                        </div>
-                        <span className="font-bold text-red-400">Pagar</span>
-                    </button>
-
-                    <button 
-                        onClick={() => setSelectedAction('receive')}
-                        className="bg-slate-800 p-6 rounded-2xl border border-slate-700 hover:border-emerald-500/50 transition active:scale-95 flex flex-col items-center justify-center gap-3 group"
-                    >
-                        <div className="p-3 bg-emerald-500/10 rounded-full group-hover:bg-emerald-500/20 transition">
-                            <ArrowDownRight className="text-emerald-500" size={28} />
-                        </div>
-                        <span className="font-bold text-emerald-400">Receber</span>
-                    </button>
-                    
-                    <button 
-                        onClick={() => setSelectedAction('transfer')}
-                        className="bg-slate-800 p-6 rounded-2xl border border-slate-700 hover:border-blue-500/50 transition active:scale-95 flex flex-col items-center justify-center gap-3 group"
-                    >
-                        <div className="p-3 bg-blue-500/10 rounded-full group-hover:bg-blue-500/20 transition">
-                            <ArrowRightLeft className="text-blue-500" size={28} />
-                        </div>
-                        <span className="font-bold text-blue-400">Transferir</span>
-                    </button>
-
-                    <button 
-                        onClick={handleOpportunity}
-                        className="bg-gradient-to-br from-indigo-600 to-purple-700 p-6 rounded-2xl border border-indigo-500 hover:from-indigo-500 hover:to-purple-600 transition active:scale-95 flex flex-col items-center justify-center gap-3 shadow-lg shadow-indigo-900/30 relative overflow-hidden group"
-                    >
-                        <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-20 transition"></div>
-                        <BrainCircuit className="text-white animate-pulse" size={32} />
-                        <span className="font-bold text-white">IA Oportunidade</span>
-                    </button>
-                </div>
-
-                {/* Lista de Outros Jogadores */}
-                <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50">
-                    <h3 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 bg-slate-500 rounded-full"></div> Outros Jogadores
-                    </h3>
-                    <div className="space-y-2 max-h-40 overflow-y-auto pr-1 scrollbar-hide">
-                        {players.filter(p => p.id !== socket.id).map(p => (
-                            <div key={p.id} className="flex justify-between items-center bg-slate-700/30 p-2.5 rounded-lg border border-slate-600/30 text-sm">
-                                <span className="font-semibold text-slate-300">{p.name}</span>
-                                <span className="text-slate-400 font-mono">{formatMoney(p.balance)}</span>
-                            </div>
-                        ))}
-                        {players.length <= 1 && <p className="text-center text-slate-600 text-xs italic py-2">Ninguém mais na sala.</p>}
-                    </div>
-                </div>
-            </>
-        ) : (
-            // HISTÓRICO
-            <div className="bg-slate-800 rounded-2xl p-4 min-h-[60vh] border border-slate-700">
-                <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-300">
-                    <History size={20} /> Histórico de Atividades
-                </h3>
-                <div className="space-y-3">
-                    {history.map((item, idx) => (
-                        <div key={idx} className="bg-slate-900/50 p-3 rounded-lg border border-slate-700/50 text-sm flex gap-3">
-                            <div className={`mt-0.5 ${
-                                item.category === 'TRANSACTION' ? 'text-blue-400' :
-                                item.category === 'OPPORTUNITY' ? 'text-purple-400' :
-                                item.category === 'GLOBAL' ? 'text-yellow-400' : 'text-slate-400'
-                            }`}>
-                                {item.category === 'TRANSACTION' && <ArrowRightLeft size={16} />}
-                                {item.category === 'OPPORTUNITY' && <BrainCircuit size={16} />}
-                                {item.category === 'GLOBAL' && <Zap size={16} />}
-                            </div>
-                            <div className="flex-1">
-                                <div className="flex justify-between text-xs text-slate-500 mb-1">
-                                    <span className="font-bold uppercase tracking-wider">{item.category}</span>
-                                    <span>{item.time}</span>
+                    <div className="p-4 space-y-6">
+                        <button 
+                            onClick={() => handleTransaction('pass_go')}
+                            className="w-full flex items-center justify-between bg-gradient-to-r from-emerald-900 to-emerald-800 border border-emerald-700/50 p-4 rounded-xl hover:brightness-110 active:scale-[0.98] transition-all"
+                        >
+                            <div className="flex items-center gap-3">
+                                <ArrowRightLeft className="text-emerald-400" />
+                                <div className="text-left">
+                                    <div className="font-bold text-emerald-100">Passar no Início</div>
+                                    <div className="text-xs text-emerald-400/70">Coletar salário</div>
                                 </div>
-                                <p className="text-slate-300 leading-snug">{item.desc}</p>
+                            </div>
+                            <span className="font-bold text-emerald-400 text-xl">+{formatMoney(PASS_GO_AMOUNT)}</span>
+                        </button>
+
+                        <button 
+                            onClick={handleOpportunity}
+                            className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-violet-900 to-purple-900 border border-purple-500/30 p-4 rounded-xl hover:brightness-110 active:scale-[0.98] transition-all group relative overflow-hidden"
+                        >
+                            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+                            <BrainCircuit className="text-purple-300 group-hover:animate-pulse" />
+                            <span className="font-bold text-purple-100">Gerar Oportunidade IA</span>
+                        </button>
+
+                        <hr className="border-slate-800" />
+
+                        <div className="space-y-4">
+                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Transações</label>
+                            
+                            <div className="relative">
+                                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">R$</div>
+                                <input 
+                                    type="number" 
+                                    inputMode="numeric" 
+                                    value={amountInput} 
+                                    onChange={(e) => setAmountInput(e.target.value)} 
+                                    placeholder="0" 
+                                    className="w-full bg-slate-950 border border-slate-700 text-white text-2xl font-mono p-4 pl-12 rounded-xl focus:border-blue-500 focus:outline-none"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-2">
+                                {players.filter(p => p.id !== selectedPlayer.id).map(target => (
+                                    <button 
+                                        key={target.id} 
+                                        onClick={() => setTransferTarget(transferTarget === target.id ? null : target.id)}
+                                        className={`p-2 rounded-lg border text-sm truncate transition-colors ${
+                                            transferTarget === target.id 
+                                            ? 'bg-blue-600 border-blue-400 text-white' 
+                                            : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
+                                        }`}
+                                    >
+                                        {target.name}
+                                    </button>
+                                ))}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                {transferTarget ? (
+                                    <button 
+                                        onClick={() => handleTransaction('transfer')} 
+                                        disabled={!amountInput}
+                                        className="col-span-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white p-4 rounded-xl font-bold flex items-center justify-center gap-2"
+                                    >
+                                        Pagar Jogador <ArrowRightLeft size={18} />
+                                    </button>
+                                ) : (
+                                    <>
+                                        <button 
+                                            onClick={() => handleTransaction('receive_bank')} 
+                                            disabled={!amountInput}
+                                            className="bg-emerald-600/20 border border-emerald-600/50 hover:bg-emerald-600/30 text-emerald-400 p-3 rounded-xl font-bold flex flex-col items-center gap-1"
+                                        >
+                                            <TrendingUp size={20} />
+                                            <span>Receber Banco</span>
+                                        </button>
+                                        <button 
+                                            onClick={() => handleTransaction('pay_bank')} 
+                                            disabled={!amountInput}
+                                            className="bg-rose-600/20 border border-rose-600/50 hover:bg-rose-600/30 text-rose-400 p-3 rounded-xl font-bold flex flex-col items-center gap-1"
+                                        >
+                                            <TrendingDown size={20} />
+                                            <span>Pagar Banco</span>
+                                        </button>
+                                    </>
+                                )}
                             </div>
                         </div>
-                    ))}
-                    {history.length === 0 && <p className="text-slate-500 text-center py-8">Nenhuma atividade registrada.</p>}
+                    </div>
                 </div>
             </div>
         )}
+
+        {/* Dashboard View */}
+        {activeTab === 'dashboard' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {players.map(player => (
+                    <div 
+                        key={player.id} 
+                        onClick={() => setSelectedPlayer(player)}
+                        className="bg-slate-900 border border-slate-800 hover:border-blue-500/50 p-5 rounded-2xl shadow-lg relative cursor-pointer group transition-all hover:translate-y-[-2px]"
+                    >
+                        <div className="flex justify-between items-start mb-2">
+                            <h3 className="text-lg font-bold text-white group-hover:text-blue-400 transition-colors">{player.name}</h3>
+                            <div className="bg-slate-800 p-2 rounded-full text-slate-400 group-hover:text-white group-hover:bg-blue-600 transition-colors">
+                                <DollarSign size={16} />
+                            </div>
+                        </div>
+                        <div className="text-3xl font-mono font-bold text-emerald-400 tracking-tight">
+                            {formatMoney(player.balance)}
+                        </div>
+                        <div className="mt-4 flex items-center gap-2 text-xs text-slate-500 uppercase font-semibold">
+                            <span>Toque para gerenciar</span>
+                            <ArrowRightLeft size={12} />
+                        </div>
+                    </div>
+                ))}
+            </div>
+        )}
+
+        {/* History View */}
+        {activeTab === 'history' && (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+                <div className="p-4 bg-slate-800 border-b border-slate-700 font-bold text-slate-300 flex items-center gap-2">
+                    <History size={18} /> Histórico de Transações
+                </div>
+                <div className="divide-y divide-slate-800 max-h-[60vh] overflow-y-auto">
+                    {history.length === 0 ? (
+                        <div className="p-8 text-center text-slate-600 italic">Nenhuma transação ainda.</div>
+                    ) : (
+                        history.map((item, idx) => (
+                            <div key={idx} className="p-4 hover:bg-slate-800/50 transition-colors">
+                                <div className="flex justify-between items-start mb-1">
+                                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                                        item.category === 'EVENTO GLOBAL' ? 'bg-yellow-900/50 text-yellow-500' :
+                                        item.category === 'OPORTUNIDADE IA' ? 'bg-purple-900/50 text-purple-400' :
+                                        'bg-blue-900/50 text-blue-400'
+                                    }`}>
+                                        {item.category}
+                                    </span>
+                                    <span className="text-xs text-slate-500">{item.time}</span>
+                                </div>
+                                <p className="text-sm text-slate-300">{item.desc}</p>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+        )}
+
       </main>
 
-      {/* Modal de Ação (Pagar/Receber/Transferir) */}
-      {selectedAction && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-slate-800 w-full max-w-sm rounded-3xl p-6 border border-slate-700 shadow-2xl transform transition-all scale-100">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                {selectedAction === 'pay' && <><ArrowUpRight className="text-red-500" /> Pagar ao Banco</>}
-                {selectedAction === 'receive' && <><ArrowDownRight className="text-emerald-500" /> Receber do Banco</>}
-                {selectedAction === 'transfer' && <><ArrowRightLeft className="text-blue-500" /> Transferir</>}
-              </h3>
-              <button onClick={() => setSelectedAction(null)} className="p-2 bg-slate-700 rounded-full hover:bg-slate-600 transition">
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {selectedAction === 'transfer' && (
-                <div>
-                  <label className="block text-xs uppercase text-slate-400 font-bold mb-2">Para quem?</label>
-                  <select 
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-white focus:border-blue-500 outline-none appearance-none"
-                    onChange={(e) => setTransferTarget(e.target.value)}
-                    value={transferTarget}
-                  >
-                    <option value="">Selecione um jogador...</option>
-                    {players.filter(p => p.id !== socket.id).map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs uppercase text-slate-400 font-bold mb-2">Valor (R$)</label>
-                <div className="relative">
-                    <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-500 font-bold text-xl">R$</span>
-                    <input 
-                    type="number" 
-                    autoFocus
-                    className={`w-full bg-slate-900 border border-slate-700 rounded-xl p-4 pl-12 text-3xl font-bold text-white outline-none placeholder-slate-700 ${
-                        selectedAction === 'pay' ? 'focus:border-red-500' :
-                        selectedAction === 'receive' ? 'focus:border-emerald-500' :
-                        'focus:border-blue-500'
-                    }`}
-                    placeholder="0"
-                    value={amountInput}
-                    onChange={(e) => setAmountInput(e.target.value)}
-                    />
-                </div>
-              </div>
-
-              <button 
-                onClick={() => handleTransaction(
-                  selectedAction === 'pay' ? 'pay_bank' : 
-                  selectedAction === 'receive' ? 'receive_bank' : 'pay_player'
-                )}
-                className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg transition transform active:scale-95 ${
-                  selectedAction === 'pay' ? 'bg-red-500 hover:bg-red-600 text-white' :
-                  selectedAction === 'receive' ? 'bg-emerald-500 hover:bg-emerald-600 text-white' :
-                  'bg-blue-500 hover:bg-blue-600 text-white'
-                }`}
-              >
-                CONFIRMAR
-              </button>
-            </div>
-          </div>
+      {/* Bottom Navigation */}
+      <nav className="fixed bottom-0 w-full bg-slate-900 border-t border-slate-800 p-2 pb-6 z-30">
+        <div className="flex justify-around max-w-md mx-auto">
+            <button 
+                onClick={() => setActiveTab('dashboard')} 
+                className={`flex flex-col items-center p-2 rounded-lg w-1/2 transition-colors ${activeTab === 'dashboard' ? 'text-emerald-400 bg-slate-800' : 'text-slate-500'}`}
+            >
+                <Users size={24} />
+                <span className="text-xs mt-1">Jogadores</span>
+            </button>
+            <button 
+                onClick={() => setActiveTab('history')} 
+                className={`flex flex-col items-center p-2 rounded-lg w-1/2 transition-colors ${activeTab === 'history' ? 'text-blue-400 bg-slate-800' : 'text-slate-500'}`}
+            >
+                <History size={24} />
+                <span className="text-xs mt-1">Histórico</span>
+            </button>
         </div>
-      )}
+      </nav>
 
     </div>
   );

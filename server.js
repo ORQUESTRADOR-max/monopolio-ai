@@ -14,6 +14,12 @@ const io = new Server(server, {
 });
 const PORT = process.env.PORT || 3000;
 
+if (process.env.GEMINI_API_KEY) {
+    console.log("✅ GEMINI_API_KEY encontrada. IA Ativada.");
+} else {
+    console.log("⚠️ GEMINI_API_KEY não encontrada. Usando modo Procedural.");
+}
+
 const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
 
 // --- Estado do Jogo ---
@@ -29,6 +35,30 @@ app.use(express.json());
 
 // Servir arquivos estáticos do React (Vite)
 app.use(express.static(path.join(__dirname, 'client/dist')));
+
+// --- Rotas de Diagnóstico ---
+app.get('/test-ai', async (req, res) => {
+    if (!process.env.GEMINI_API_KEY) {
+        return res.json({ status: 'error', message: 'Variável GEMINI_API_KEY não encontrada no ambiente.' });
+    }
+
+    try {
+        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+        const result = await model.generateContent("Diga apenas 'IA Funcionando' se você estiver me ouvindo.");
+        const response = await result.response;
+        res.json({ 
+            status: 'success', 
+            ai_response: response.text(),
+            key_preview: process.env.GEMINI_API_KEY.substring(0, 5) + '...' 
+        });
+    } catch (error) {
+        res.status(500).json({ 
+            status: 'error', 
+            message: 'Erro ao conectar com Gemini', 
+            details: error.message 
+        });
+    }
+});
 
 // --- Rota Principal (React SPA) ---
 app.get('*', (req, res) => {
